@@ -1,0 +1,12 @@
+# debug why acc doesn't go up 
+
+0. retrain all models as i accidentally set dev to train 
+1. cross-entropy with temperateure scaling? Alternatively predict soft cluster distance via KL 
+2. check predicted classes --> load the trained model, run infernece and check acc. 
+3. draw up an illustartion of my approach and show to Liming and Surabh 
+
+# implement 
+
+
+# ideas 
+predict soft-cluster distance via KL 
