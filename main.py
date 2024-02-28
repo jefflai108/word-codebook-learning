@@ -9,6 +9,10 @@ from torch.utils.tensorboard import SummaryWriter
 from src.model import SpeechTransformerModel
 from src.data import get_train_loader, get_eval_loader
 
+PAD_TOKEN = 1024
+SOS_TOKEN = 1025 
+EOS_TOKEN = 1026 
+
 def configure_logging(save_dir):
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
     logging.basicConfig(level=logging.INFO, format=log_format, datefmt='%Y-%m-%d %H:%M:%S',
@@ -94,8 +98,11 @@ def train(model, train_dataloader, dev_dataloader, current_epoch, epochs, logger
                 X = X.transpose(0, 1) 
                 Y = Y.transpose(0, 1)
 
+                # shift targets for teacher forcing
+                Y_input = torch.cat([torch.full((1, Y.shape[1]), SOS_TOKEN, dtype=Y.dtype, device=Y.device), Y[:-1]], dim=0)
+
                 # Forward pass
-                loss, (acc, preds, corrects) = model.train_step(X, Y, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
+                loss, (acc, preds, targets) = model.train_step(X, Y_input, Y, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
                 log_loss += loss
                 log_acc += acc 
 
@@ -109,7 +116,7 @@ def train(model, train_dataloader, dev_dataloader, current_epoch, epochs, logger
                     tb_writer.add_scalar('Loss/train', log_avg_loss, epoch * len(train_dataloader) + batch_idx)
                     tb_writer.add_scalar('Accuracy/train', log_avg_acc, epoch * len(train_dataloader) + batch_idx)
                     tb_writer.add_scalar('Learning_Rate', current_lr, epoch * len(train_dataloader) + batch_idx)
-                    logging.info(f"Epoch: {epoch+1}, Step: {batch_idx+1}, Averaged Loss: {log_avg_loss:.4f}, Averaged Acc: {log_avg_acc:.4f}, LR: {current_lr:.5f}")
+                    logging.info(f"Epoch: {epoch}, Step: {batch_idx+1}, Averaged Loss: {log_avg_loss:.4f}, Averaged Acc: {log_avg_acc:.4f}, LR: {current_lr:.5f}")
                     log_loss, log_acc = 0, 0
 
             avg_loss = total_loss / len(train_dataloader)
@@ -131,7 +138,10 @@ def train(model, train_dataloader, dev_dataloader, current_epoch, epochs, logger
                     X = X.transpose(0, 1) 
                     Y = Y.transpose(0, 1)
 
-                    loss, (acc, preds, corrects) = model.eval_step(X, Y, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
+                    # shift targets for teacher forcing
+                    Y_input = torch.cat([torch.full((1, Y.shape[1]), SOS_TOKEN, dtype=Y.dtype, device=Y.device), Y[:-1]], dim=0)
+
+                    loss, (acc, preds, targets) = model.eval_step(X, Y_input, Y, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
                     total_loss += loss
                     total_acc += acc
             
@@ -145,7 +155,7 @@ def train(model, train_dataloader, dev_dataloader, current_epoch, epochs, logger
         train_loss, current_step = _train(current_step)
         val_loss, val_acc = _val()
     
-        model_save_path = os.path.join(save_dir, f'model_epoch_{epoch}_loss_{best_loss:.4f}.pth')
+        model_save_path = os.path.join(save_dir, f'model_epoch_{epoch}_loss_{val_loss:.4f}.pth')
         model.save_model(epoch, model_save_path)
         logger.info(f'Model saved to {model_save_path}') 
         if val_loss < best_loss:
@@ -185,10 +195,10 @@ def main():
         optimizer_type=args.optimizer_type, 
         logger=logger, 
     )
-    if os.path.exists(os.path.join(save_dir, f'best_loss_model.pth')):
-        current_epoch = model.load_model(os.path.join(save_dir, f'best_loss_model.pth'))
-    else: current_epoch = 0 
     model = model.to(device)
+    if os.path.exists(os.path.join(args.save_dir, f'best_loss_model.pth')):
+        current_epoch = model.load_model(os.path.join(args.save_dir, f'best_loss_model.pth'))
+    else: current_epoch = 0 
 
     # Setup dataloaders 
     train_data_loader = get_train_loader(args.train_file_path, args.word_seg_file_path, args.segment_context_size, args.batch_size, shuffle=True, num_workers=2, max_seq_len=args.max_seq_length)

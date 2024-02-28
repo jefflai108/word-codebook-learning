@@ -12,6 +12,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger('SpeechTransformer')
 
 PAD_TOKEN = 1024
+SOS_TOKEN = 1025 
+EOS_TOKEN = 1026 
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):
@@ -149,9 +151,12 @@ class SpeechTransformerModel(nn.Module):
         encoder_output = self.encoder(src, src_mask, src_key_padding_mask) # [seq_len, batch_size, hidden_dim]
         # Pool encoder outputs to a single representation
         pooled_output = self.pooling(encoder_output.permute(1, 2, 0)).squeeze(-1) # [batch_size, hidden_dim] 
+        # remove this -- for debugging purpose 
+        #dummy = pooled_output.new_zeros(pooled_output.size())
 
         context_size = tgt.size(1) // encoder_output.size(1)
         pooled_output_expanded = pooled_output.repeat_interleave(context_size, dim=0) # repeat by context size
+        #pooled_output_expanded = dummy.repeat_interleave(context_size, dim=0) # repeat by context size
         memory_key_padding_mask = memory_key_padding_mask.repeat_interleave(context_size, dim=0) # repeat by context size
         pooled_output_expanded = pooled_output_expanded.repeat(src.size(0), 1, 1) # repeat by src_seq_len
         output = self.decoder(tgt, pooled_output_expanded, tgt_mask, tgt_key_padding_mask, memory_key_padding_mask)
@@ -186,13 +191,14 @@ class SpeechTransformerModel(nn.Module):
         pooled_output = self.pooling(encoder_output.permute(1, 2, 0)).squeeze(-1) # [batch_size, hidden_dim]
         return pooled_output
 
-    def train_step(self, src, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):
+    def train_step(self, src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):
         """
         Performs a single training step, including forward pass, loss calculation, backpropagation, and optimization.
 
         Parameters:
         - src (Tensor): Source sequences tensor with shape (seq_len, batch_size).
-        - tgt (Tensor): Target sequences tensor with shape (seq_len, batch_size).
+        - tgt_input (Tensor): Input target sequences tensor with shape (seq_len, batch_size).
+        - tgt (Tensor): Original target sequences tensor with shape (seq_len, batch_size).
         - src_mask (Tensor): Source sequence mask tensor.
         - tgt_mask (Tensor): Target sequence mask tensor.
         - src_key_padding_mask (Tensor): Source key padding mask tensor.
@@ -210,8 +216,8 @@ class SpeechTransformerModel(nn.Module):
         self.train()
         self.optimizer.zero_grad()
         
-        # Output shape should now consider the context size: (B, C, T, vocab_size)
-        output = self.forward(src, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
+        # Forward pass
+        output = self.forward(src, tgt_input, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
 
         # Reshape for loss calculation
         output_reshaped = output.reshape(-1, output.size(-1))
@@ -234,17 +240,18 @@ class SpeechTransformerModel(nn.Module):
 
         # Calculate accuracy
         with torch.no_grad():
-            accuracy, predictions, ground_truths = calculate_accuracy(output_reshaped, tgt_reshaped)
+            accuracy, predictions, ground_truths = calculate_accuracy(output_reshaped, tgt_reshaped, PAD_TOKEN)
         
         return total_loss.item(), (accuracy, predictions, ground_truths)
 
-    def eval_step(self, src, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):
+    def eval_step(self, src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):
         """
         Evaluates the model on a given batch of data, calculating loss and accuracy without performing any backpropagation.
 
         Parameters:
         - src (Tensor): Source sequences tensor with shape (seq_len, batch_size).
-        - tgt (Tensor): Target sequences tensor with shape (seq_len, batch_size).
+        - tgt_input (Tensor): Input target sequences tensor with shape (seq_len, batch_size).
+        - tgt (Tensor): Original target sequences tensor with shape (seq_len, batch_size).
         - src_mask (Tensor): Source sequence mask tensor.
         - tgt_mask (Tensor): Target sequence mask tensor.
         - src_key_padding_mask (Tensor): Source key padding mask tensor.
@@ -260,7 +267,7 @@ class SpeechTransformerModel(nn.Module):
         """
         self.eval()
         with torch.no_grad():
-            output = self.forward(src, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
+            output = self.forward(src, tgt_input, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
 
             # Reshape for loss calculation
             output_reshaped = output.reshape(-1, output.size(-1))
@@ -269,7 +276,7 @@ class SpeechTransformerModel(nn.Module):
             total_loss = self.criterion(output_reshaped, tgt_reshaped)
 
             # Calculate accuracy
-            accuracy, predictions, ground_truths = calculate_accuracy(output_reshaped, tgt_reshaped)
+            accuracy, predictions, ground_truths = calculate_accuracy(output_reshaped, tgt_reshaped, PAD_TOKEN)
 
         return total_loss.item(), (accuracy, predictions, ground_truths)
 

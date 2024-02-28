@@ -1,12 +1,20 @@
-# debug why acc doesn't go up 
-
-0. retrain all models as i accidentally set dev to train 
+# debug why pred acc is 100% 
+-1. pooled_output = torch.randn(pooled_output.shape) -- check if the encoder repre is actually used. --> DONE, and yes it makes a diff 
+0. retrain all models as i accidentally set dev to train and the acc. calculation is incorrect --> DONE 
 1. cross-entropy with temperateure scaling? Alternatively predict soft cluster distance via KL 
-2. check predicted classes --> load the trained model, run infernece and check acc. 
+2. check predicted classes --> load the trained model, run infernece and check acc. --> DONE 
 3. draw up an illustartion of my approach and show to Liming and Surabh 
+push code to github to share with Liming and Bhati 
+
+# results analyses 
+1. observe the effects of different hyper-param like context-size 
+2. run inference, produce embed --> offline km? 
 
 # implement 
-
+3. shift the input to the decoder by 1 --> DONE 
+4. autoregressive-decoding during inference (no teacher-forcing) 
+5. end of segment token to indicate finish decoding?
+6. make dev / test forward pass deterministic? how to do that? 
 
 # ideas 
 predict soft-cluster distance via KL 

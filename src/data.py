@@ -5,6 +5,8 @@ from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 
 PAD_TOKEN = 1024
+SOS_TOKEN = 1025 
+EOS_TOKEN = 1026 
 
 def parse_data(file_path):
     data = []
@@ -67,7 +69,7 @@ class SpeechTokensDataset(Dataset):
         self.utt2boundaries = read_word_seg_features(word_seg_file_path)
         self.ground_truth_word_seg = ground_truth_word_seg
         self.K = segment_context_size
-        self.max_seq_len = max_seq_len
+        self.max_seq_len = max_seq_len - 2 # account for SOS and BOS token
 
     def __len__(self):
         return len(self.data)
@@ -98,7 +100,7 @@ class SpeechTokensDataset(Dataset):
             segment_idx = 0
 
         # Initialize Y with padding values
-        max_y_len = min(max(boundaries[1:] - boundaries[:-1]), self.max_seq_len) 
+        max_y_len = min(max([b - a for a, b in zip(boundaries[:-1], boundaries[1:])]), self.max_seq_len) + 1  # +1 for EOS
         Y = torch.full((2*self.K, max_y_len), PAD_TOKEN, dtype=torch.long)
 
         # Extract and de-duplicate segments for X and Y, handling edge cases
@@ -108,6 +110,8 @@ class SpeechTokensDataset(Dataset):
                 start_idx, end_idx = boundaries[segment_idx], boundaries[segment_idx + 1]
                 X = self.deduplicate_segment(tokens_tensor[start_idx:end_idx])
                 X = self.crop_segment_length(X)
+                # Add SOS and EOS tokens for X
+                X = torch.cat([torch.tensor([SOS_TOKEN]), X, torch.tensor([EOS_TOKEN])])
             else:  # Context segments for Y, with repetition for edge cases
                 if context_idx < 0:
                     context_idx = 0  # Repeat the first segment if out of range on the left
@@ -116,6 +120,8 @@ class SpeechTokensDataset(Dataset):
                 start_idx, end_idx = boundaries[context_idx], boundaries[context_idx + 1]
                 context_segment = self.deduplicate_segment(tokens_tensor[start_idx:end_idx])
                 context_segment = self.crop_segment_length(context_segment)
+                # Add EOS tokens for each context_segment
+                context_segment = torch.cat([context_segment, torch.tensor([EOS_TOKEN])])
                 # Pad and place in Y
                 if i < 0:
                     Y[self.K+i, :len(context_segment)] = context_segment
@@ -201,6 +207,7 @@ def collate_fn(batch):
 
     # memory_key_padding_mask can be the same as src_key_padding_mask if encoder outputs are used as is in the decoder
     memory_key_padding_mask = src_key_padding_mask.clone()
+    
     return Xs_padded, Ys_flattened, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask_flattened, memory_key_padding_mask
 
 def get_train_loader(file_path, word_seg_file_path, segment_context_size=3, batch_size=128, shuffle=True, num_workers=2, max_seq_len=512):

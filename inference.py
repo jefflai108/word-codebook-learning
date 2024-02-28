@@ -7,6 +7,7 @@ import torch
 
 from src.model import SpeechTransformerModel
 from src.data import get_train_loader, get_eval_loader
+from src.util import plot_pred_label_distribution
 
 def configure_logging(save_dir):
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
@@ -56,9 +57,9 @@ def parse_args():
 
     return parser.parse_args()
 
-def inference(model, num_classes, test_dataloader, logger, save_dir, device):
+def inference(model, num_classes, test_dataloader, logger, save_dir, device): 
     total_predictions_per_class = torch.zeros(num_classes, dtype=torch.long)
-    total_ground_truths_per_class = torch.zeros(num_classes, dtype=torch.long)
+    total_targets_per_class = torch.zeros(num_classes, dtype=torch.long)
 
     model.eval()
     with torch.no_grad():
@@ -72,38 +73,37 @@ def inference(model, num_classes, test_dataloader, logger, save_dir, device):
             X = X.transpose(0, 1) 
             Y = Y.transpose(0, 1)
 
-            loss, (acc, preds, ground_truths) = model.eval_step(X, Y, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
+            loss, (acc, preds, targets) = model.eval_step(X, Y, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
 
             for i in range(num_classes):
                 # Update ground truths for class i
-                total_ground_truths_per_class[i] += (ground_truths == i).sum().item()
+                total_targets_per_class[i] += (targets == i).sum().item()
                 # Update total predictions for class i
                 total_predictions_per_class[i] += (preds == i).sum().item()
+       
+        # Calculate overall accuracy directly
+        correct_predictions = torch.min(total_predictions_per_class, total_targets_per_class).sum().item()  # Account for potential mismatches
+        total_predictions = total_predictions_per_class.sum().item()
+        overall_accuracy = correct_predictions / total_predictions	
 
+        import pdb; pdb.set_trace()
+
+        total_predictions_per_class = [(label, x) for label, x in enumerate(total_predictions_per_class.numpy())]
+        total_targets_per_class = [(label, x) for label, x in enumerate(total_targets_per_class.numpy())]
+		
+
+        import pdb; pdb.set_trace()
+        plot_pred_label_distribution(total_predictions_per_class, total_targets_per_class)
+        
         # Sort total_predictions_per_class and get the sorted indices (class labels)
         sorted_predictions, sorted_prediction_classes = torch.sort(total_predictions_per_class, descending=True)
-        sorted_ground_truths, sorted_ground_truths_classes = torch.sort(total_ground_truths_per_class, descending=True)
+        sorted_targets, sorted_targets_classes = torch.sort(total_targets_per_class, descending=True)
 
         # Create a list of (class, number of predictions) tuples
         sorted_prediction_distribution = [(int(cls), predictions.item()) for cls, predictions in zip(sorted_prediction_classes, sorted_predictions)]
-        sorted_ground_truth_distribution = [(int(cls), ground_truths.item()) for cls, ground_truths in zip(sorted_ground_truths_classes, sorted_ground_truths)]
+        sorted_ground_truth_distribution = [(int(cls), targets.item()) for cls, targets in zip(sorted_targets_classes, sorted_targets)]
         print(sorted_prediction_distribution)
         print(sorted_ground_truth_distribution)
-
-        ## Calculate and sort class-wise accuracies
-        #class_accuracies = torch.where(
-        #    total_predictions_per_class > 0,
-        #    correct_predictions_per_class / total_predictions_per_class,
-        #    torch.zeros_like(total_predictions_per_class, dtype=torch.float)
-        #)
-
-        #sorted_accuracies, sorted_classes = torch.sort(class_accuracies, descending=True)
-
-        #import pdb; pdb.set_trace()
-        ## Display sorted accuracies and corresponding classes
-
-        #import pdb; pdb.set_trace()
-        #sorted_accuracies_display = [(int(cls), acc.item()) for cls, acc in zip(sorted_classes, sorted_accuracies) if not torch.isnan(acc)]
 
 def main():
     args = parse_args()
@@ -132,8 +132,8 @@ def main():
         optimizer_type=args.optimizer_type, 
         logger=logger, 
     )
-    model.load_model(args.load_model_path)
     model = model.to(device)
+    model.load_model(args.load_model_path)
 
     # Setup dataloaders 
     test_data_loader = get_train_loader(args.test_file_path, args.word_seg_file_path, args.segment_context_size, args.batch_size, shuffle=False, num_workers=2, max_seq_len=args.max_seq_length)

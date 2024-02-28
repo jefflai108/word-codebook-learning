@@ -3,14 +3,16 @@ import torch
 from torch.utils.data import DataLoader
 from src.data import SpeechTokensDataset, collate_fn 
 
-PAD_TOKEN = 1024 
+PAD_TOKEN = 1024
+SOS_TOKEN = 1025 
+EOS_TOKEN = 1026 
 
 class TestDataLoader(unittest.TestCase):
     def setUp(self):
         self.test_file_path = '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechtokens/rvq1/flickr_8k_rvq1_tokens_test.txt'
         self.word_seg_file_path = '/data/sls/scratch/sbhati/data/flicker/flicker_speech_features.mat'
         self.batch_size = 4 
-        self.vocab_size = 1024 + 1 # account for PAD_TOKEN
+        self.vocab_size = 1024 + 3 # account for special tokens 
         self.segment_context_size = 3
         self.dataset = SpeechTokensDataset(
             file_path=self.test_file_path, 
@@ -65,7 +67,7 @@ class TestDataLoader(unittest.TestCase):
             for batch in X:
                 # Convert to a list for easier manipulation
                 x_list = batch.tolist()
-                # Filter out padding values (-1) before checking for consecutive duplicates
+                # Filter out padding values before checking for consecutive duplicates
                 filtered_x = [x for x in x_list if x != PAD_TOKEN]
                 # Check that no consecutive elements are the same in the filtered list
                 self.assertTrue(all(filtered_x[i] != filtered_x[i + 1] for i in range(len(filtered_x) - 1)), "X contains consecutive duplicates")

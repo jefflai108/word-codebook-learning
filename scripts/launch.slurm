@@ -14,6 +14,8 @@ CONDA_ROOT=/data/sls/scratch/clai24/anaconda3
 source ${CONDA_ROOT}/etc/profile.d/conda.sh 
 conda activate /data/sls/scratch/clai24/anaconda3/envs/prompt-gpt4
 
+export PYTHONPATH=$PYTHONPATH:/data/sls/scratch/clai24/word-seg/codebook-learning
+
 data_dir=/data/sls/scratch/clai24/word-seg/flicker8k/
 
 d_model=$1
@@ -31,9 +33,10 @@ CUDA_LAUNCH_BLOCKING=1 python main.py \
                --dev_file_path ${data_dir}/preprocess/speechtokens/rvq1/flickr_8k_rvq1_tokens_dev.txt \
                --word_seg_file_path ${data_dir}/word_seg_features/flicker_speech_features.mat \
                --save_dir ${expdir} \
-               --batch_size 48 \
+               --batch_size 64 \
                --segment_context_size ${context_size} \
-               --vocab_size 1025 --d_model ${d_model} --nhead 8 --num_encoder_layers ${num_encoder_layers} --num_decoder_layers ${num_decoder_layers} --dim_feedforward ${ffn_dim} \
+               --vocab_size 1027 --d_model ${d_model} --nhead 8 --num_encoder_layers ${num_encoder_layers} --num_decoder_layers ${num_decoder_layers} --dim_feedforward ${ffn_dim} \
                --dropout ${dp} --max_seq_length 128 --epochs 20 --log_interval 20 --learning_rate ${lr} --optimizer_type "adam" \
                >> ${expdir}/training.log 2>&1
+
 
