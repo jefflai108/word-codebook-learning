@@ -202,7 +202,7 @@ def main():
 
     # Setup dataloaders 
     train_data_loader = get_train_loader(args.train_file_path, args.word_seg_file_path, args.segment_context_size, args.batch_size, shuffle=True, num_workers=2, max_seq_len=args.max_seq_length)
-    dev_data_loader = get_train_loader(args.dev_file_path, args.word_seg_file_path, args.segment_context_size, args.batch_size, shuffle=False, num_workers=2, max_seq_len=args.max_seq_length)
+    dev_data_loader = get_eval_loader(args.dev_file_path, args.word_seg_file_path, args.segment_context_size, args.batch_size, shuffle=False, num_workers=2, max_seq_len=args.max_seq_length)
 
     # Run the training
     train(model, train_data_loader, dev_data_loader, current_epoch, args.epochs, logger, tb_writer, args.log_interval, args.learning_rate, args.save_dir, device)

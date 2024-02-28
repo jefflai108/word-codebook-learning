@@ -78,7 +78,6 @@ class SpeechTransformerModel(nn.Module):
     Attributes:
         shared_embedding (nn.Embedding): A shared embedding layer for both the encoder and decoder.
         encoder (TransformerEncoderModule): The Transformer encoder module.
-        pooling (nn.AdaptiveAvgPool1d): An adaptive average pooling layer to pool encoder outputs.
         decoder (TransformerDecoderModule): The Transformer decoder module.
         optimizer (torch.optim): The optimizer for training the model.
         criterion (nn.CrossEntropyLoss): The loss function.
@@ -101,7 +100,6 @@ class SpeechTransformerModel(nn.Module):
         self.logger = logger or logging.getLogger('SpeechTransformerModel')
         self.shared_embedding = nn.Embedding(vocab_size, d_model)
         self.encoder = TransformerEncoderModule(self.shared_embedding, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, max_seq_length)
-        self.pooling = nn.AdaptiveAvgPool1d(1)  # Pooling to get single representation
         self.decoder = TransformerDecoderModule(self.shared_embedding, d_model, nhead, num_decoder_layers, dim_feedforward, dropout, max_seq_length, vocab_size)
         
         self.init_weights()
@@ -132,6 +130,47 @@ class SpeechTransformerModel(nn.Module):
         self.shared_embedding.weight.data.uniform_(-initrange, initrange)
         self.decoder.init_weights()
 
+    def encoder_masked_avg_pooling(self, encoder_output, src_key_padding_mask):
+        """
+        Performs masked average pooling on the encoder's output.
+
+        This method computes the mean of each feature across the sequence length, ignoring the elements
+        marked as padding in the `src_key_padding_mask`. This ensures that the pooled representation
+        does not include the influence of padding tokens, providing a more accurate summary of the
+        actual sequence content. The operation is performed per batch and feature dimension.
+
+        Parameters:
+        - encoder_output (torch.Tensor): The output from the encoder with shape [seq_len, batch_size, hidden_dim],
+          where `seq_len` is the length of the sequence, `batch_size` is the number of samples in the batch, and
+          `hidden_dim` is the dimensionality of the encoder's output features.
+        - src_key_padding_mask (torch.Tensor): A boolean tensor indicating which elements of the sequence are padding tokens,
+          with shape [batch_size, seq_len]. `True` values indicate padding tokens, and `False` values indicate actual sequence elements.
+
+        Returns:
+        - torch.Tensor: The masked average pooled representation of the encoder's output, with shape [batch_size, hidden_dim].
+          This tensor provides a single vector representation per batch item, summarizing the non-padding elements of the input sequence.
+        """
+        # Permute encoder_output to [batch_size, hidden_dim, seq_len]
+        encoder_output = encoder_output.permute(1, 2, 0)
+        
+        # Invert the mask: True for valid, False for pad
+        mask = ~src_key_padding_mask
+        
+        # Expand mask to match encoder_output's shape
+        mask_expanded = mask.unsqueeze(1).expand(-1, encoder_output.size(1), -1).to(encoder_output.dtype)
+        
+        # Apply mask, sum over seq_len, and compute the sum of valid (non-pad) positions
+        sum_pool = (encoder_output * mask_expanded).sum(dim=2)
+        valid_counts = mask_expanded.sum(dim=2)
+        
+        # Avoid division by zero for sequences that are fully padded
+        valid_counts = valid_counts.masked_fill(valid_counts == 0, 1)
+        
+        # Compute masked average
+        masked_avg = sum_pool / valid_counts
+        
+        return masked_avg
+
     def forward(self, src, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):
         """
         Performs the forward pass of the model.
@@ -149,17 +188,18 @@ class SpeechTransformerModel(nn.Module):
             Tensor: The output of the decoder.
         """
         encoder_output = self.encoder(src, src_mask, src_key_padding_mask) # [seq_len, batch_size, hidden_dim]
-        # Pool encoder outputs to a single representation
-        pooled_output = self.pooling(encoder_output.permute(1, 2, 0)).squeeze(-1) # [batch_size, hidden_dim] 
-        # remove this -- for debugging purpose 
-        #dummy = pooled_output.new_zeros(pooled_output.size())
+        #import pdb; pdb.set_trace()
+        # Use the masked_avg_pooling method for pooling encoder outputs to a single representation
+        pooled_output = self.encoder_masked_avg_pooling(encoder_output, src_key_padding_mask) # [batch_size, hidden_dim]
+        #pooled_output = self.pooling(encoder_output.permute(1, 2, 0)).squeeze(-1) # [batch_size, hidden_dim] 
 
         context_size = tgt.size(1) // encoder_output.size(1)
         pooled_output_expanded = pooled_output.repeat_interleave(context_size, dim=0) # repeat by context size
-        #pooled_output_expanded = dummy.repeat_interleave(context_size, dim=0) # repeat by context size
         memory_key_padding_mask = memory_key_padding_mask.repeat_interleave(context_size, dim=0) # repeat by context size
-        pooled_output_expanded = pooled_output_expanded.repeat(src.size(0), 1, 1) # repeat by src_seq_len
-        output = self.decoder(tgt, pooled_output_expanded, tgt_mask, tgt_key_padding_mask, memory_key_padding_mask)
+        #import pdb; pdb.set_trace()
+        pooled_output_expanded = pooled_output_expanded.unsqueeze(0)
+        #output = self.decoder(tgt, pooled_output_expanded, tgt_mask, tgt_key_padding_mask, memory_key_padding_mask)
+        output = self.decoder(tgt, pooled_output_expanded, tgt_mask, tgt_key_padding_mask, None)
         
         #B* T = tgt.shape
         ## Prepare an empty tensor to hold decoder outputs for each context
@@ -188,7 +228,7 @@ class SpeechTransformerModel(nn.Module):
             Tensor: The pooled encoder output.
         """
         encoder_output = self.encoder(src, src_mask, src_key_padding_mask)
-        pooled_output = self.pooling(encoder_output.permute(1, 2, 0)).squeeze(-1) # [batch_size, hidden_dim]
+        pooled_output = self.encoder_masked_avg_pooling(encoder_output, src_key_padding_mask) # [batch_size, hidden_dim]
         return pooled_output
 
     def train_step(self, src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):

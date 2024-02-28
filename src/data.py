@@ -70,6 +70,7 @@ class SpeechTokensDataset(Dataset):
         self.ground_truth_word_seg = ground_truth_word_seg
         self.K = segment_context_size
         self.max_seq_len = max_seq_len - 2 # account for SOS and BOS token
+        self.mode = mode 
 
     def __len__(self):
         return len(self.data)
@@ -91,13 +92,42 @@ class SpeechTokensDataset(Dataset):
             boundaries = [0] + predicted_boundaries + [len(tokens)]
         assert len(tokens) >= boundaries[-1], "Token length is shorter than the last boundary index"
 
-        # Ensure there are enough boundaries to select a valid segment
-        if len(boundaries) > 2*self.K + 1:
-            # Randomly select a center segment index, ensuring it has K segments on either side
-            segment_idx = random.randint(self.K, len(boundaries) - self.K - 2)
+        # [inference mode] return entire utterances 
+        if self.mode == 'inference':
+            # Calculate max segment length for padding
+            max_segment_len = max([b - a for a, b in zip(boundaries[:-1], boundaries[1:])]) 
+            max_segment_len = min(max_segment_len, self.max_seq_len) + 2 # +2 for SOS and EOS tokens
+
+            # Segment and pad
+            segments = []
+            for i in range(len(boundaries) - 1):
+                start_idx, end_idx = boundaries[i], boundaries[i + 1]
+                segment = tokens_tensor[start_idx:end_idx]
+                segment = self.deduplicate_segment(segment) 
+                segment = self.crop_segment_length(segment) 
+                segment_with_tokens = torch.cat([torch.tensor([SOS_TOKEN], dtype=torch.long), segment, torch.tensor([EOS_TOKEN], dtype=torch.long)])
+                padded_segment = torch.full((max_segment_len,), PAD_TOKEN, dtype=torch.long)
+                padded_segment[:len(segment_with_tokens)] = segment_with_tokens
+                segments.append(padded_segment)
+
+            # Stack segments into a single tensor
+            segments_tensor = torch.stack(segments)
+
+            return uttid, segments_tensor
+
+        # Determine segment index based on mode and context availability
+        if self.mode == 'eval':
+            # [eval, deterministic] always select the most central segment
+            center_index = len(boundaries) // 2
+            segment_idx = center_index
         else:
-            # Default to the first segment if not enough segments for context
-            segment_idx = 0
+            # [train] handling based on the availability of enough context
+            if len(boundaries) > 2*self.K + 1:
+                # Randomly select a center segment index ensuring it has K segments on either side
+                segment_idx = random.randint(self.K, len(boundaries) - self.K - 2)
+            else:
+                # Randomly select from available segments, ensuring some level of context is possible
+                segment_idx = random.randint(0, max(0, len(boundaries) - 2))
 
         # Initialize Y with padding values
         max_y_len = min(max([b - a for a, b in zip(boundaries[:-1], boundaries[1:])]), self.max_seq_len) + 1  # +1 for EOS
@@ -210,6 +240,34 @@ def collate_fn(batch):
     
     return Xs_padded, Ys_flattened, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask_flattened, memory_key_padding_mask
 
+def inference_collate_fn(batch):
+    uttids = [item[0] for item in batch] 
+
+    # Find the maximum number of segments and max segment length across the batch
+    max_num_segments = max([item[1].size(0) for item in batch])
+    max_segment_len = max([item[1].size(1) for item in batch])
+    
+    # Initialize a padded batch tensor with PAD_TOKEN
+    padded_batch = torch.full((len(batch), max_num_segments, max_segment_len), PAD_TOKEN, dtype=torch.long)
+    
+    # Loop through each item and copy its segments into the corresponding location in the padded batch tensor
+    for i, (_, segments_tensor) in enumerate(batch):
+        num_segments, segment_len = segments_tensor.size()
+        padded_batch[i, :num_segments, :segment_len] = segments_tensor
+
+    # Reshape from (B, S, T) to (B*S, T)
+    B, S, T = padded_batch.shape
+    reshaped_segments = padded_batch.view(B*S, T)
+
+    # remove rows that are entirely PAD_TOKEN 
+    not_padding_mask = ~(reshaped_segments == PAD_TOKEN).all(dim=1)
+    filtered_segments = reshaped_segments[not_padding_mask]
+
+    src_mask = None
+    src_key_padding_mask = (filtered_segments == PAD_TOKEN)
+    
+    return uttids, filtered_segments, src_mask, src_key_padding_mask
+
 def get_train_loader(file_path, word_seg_file_path, segment_context_size=3, batch_size=128, shuffle=True, num_workers=2, max_seq_len=512):
     dataset = SpeechTokensDataset(
         file_path=file_path, 
@@ -231,5 +289,17 @@ def get_eval_loader(file_path, word_seg_file_path, segment_context_size=3, batch
         mode='eval', 
         max_seq_len=max_seq_len, 
     )
+
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)
+
+def get_inference_loader(file_path, word_seg_file_path, segment_context_size=3, batch_size=128, shuffle=False, num_workers=2, max_seq_len=512):
+    dataset = SpeechTokensDataset(
+        file_path=file_path, 
+        word_seg_file_path=word_seg_file_path, 
+        ground_truth_word_seg=True, 
+        segment_context_size=segment_context_size, 
+        mode='inference', 
+        max_seq_len=max_seq_len, 
+    )
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, collate_fn=inference_collate_fn)
 

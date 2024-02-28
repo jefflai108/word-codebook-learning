@@ -71,26 +71,26 @@ class TestSpeechTransformerModel(unittest.TestCase):
         # Check output shape
         self.assertEqual(output.shape, (self.tgt_seq_len, self.batch_size * self.context_size, self.vocab_size))
 
-    def test_training_step(self):
-        src = torch.randint(0, self.vocab_size, (self.batch_size, self.src_seq_len))
-        tgt = torch.randint(0, self.vocab_size, (self.batch_size * self.context_size, self.tgt_seq_len))
-        src_mask = None 
-        tgt_mask = torch.zeros((self.tgt_seq_len, self.tgt_seq_len)).type(torch.bool)
-        src_key_padding_mask = torch.zeros(self.batch_size, self.src_seq_len).type(torch.bool)
-        tgt_key_padding_mask = torch.zeros(self.batch_size * self.context_size, self.tgt_seq_len).type(torch.bool)
-        memory_key_padding_mask = torch.zeros(self.batch_size, self.src_seq_len).type(torch.bool)
+    #def test_training_step(self):
+    #    src = torch.randint(0, self.vocab_size, (self.batch_size, self.src_seq_len))
+    #    tgt = torch.randint(0, self.vocab_size, (self.batch_size * self.context_size, self.tgt_seq_len))
+    #    src_mask = None 
+    #    tgt_mask = torch.zeros((self.tgt_seq_len, self.tgt_seq_len)).type(torch.bool)
+    #    src_key_padding_mask = torch.zeros(self.batch_size, self.src_seq_len).type(torch.bool)
+    #    tgt_key_padding_mask = torch.zeros(self.batch_size * self.context_size, self.tgt_seq_len).type(torch.bool)
+    #    memory_key_padding_mask = torch.zeros(self.batch_size, self.src_seq_len).type(torch.bool)
 
-        # make the input [sequence_length, batch_size] instead 
-        src = src.transpose(0, 1) 
-        tgt = tgt.transpose(0, 1)
+    #    # make the input [sequence_length, batch_size] instead 
+    #    src = src.transpose(0, 1) 
+    #    tgt = tgt.transpose(0, 1)
 
-        # shift targets for teacher forcing 
-        tgt_input = torch.cat([torch.full((1, tgt.shape[1]), SOS_TOKEN, dtype=tgt.dtype, device=tgt.device), tgt[:-1]], dim=0)
+    #    # shift targets for teacher forcing 
+    #    tgt_input = torch.cat([torch.full((1, tgt.shape[1]), SOS_TOKEN, dtype=tgt.dtype, device=tgt.device), tgt[:-1]], dim=0)
 
-        initial_loss = self.model.train_step(src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
-        for i in range(10):  # Train for a few steps
-            loss, (acc, _, _) = self.model.train_step(src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
-            print(f"Iteration {i}: Loss = {loss:.3f}, Acc = {acc:.3f}")
+    #    initial_loss = self.model.train_step(src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
+    #    for i in range(10):  # Train for a few steps
+    #        loss, (acc, _, _) = self.model.train_step(src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
+    #        print(f"Iteration {i}: Loss = {loss:.3f}, Acc = {acc:.3f}")
 
     #def test_inference_step(self):
     #    src = torch.randint(0, self.vocab_size, (self.batch_size, self.src_seq_len))

@@ -36,7 +36,7 @@ CUDA_LAUNCH_BLOCKING=1 python main.py \
                --batch_size 64 \
                --segment_context_size ${context_size} \
                --vocab_size 1027 --d_model ${d_model} --nhead 8 --num_encoder_layers ${num_encoder_layers} --num_decoder_layers ${num_decoder_layers} --dim_feedforward ${ffn_dim} \
-               --dropout ${dp} --max_seq_length 128 --epochs 20 --log_interval 20 --learning_rate ${lr} --optimizer_type "adam" \
+               --dropout ${dp} --max_seq_length 130 --epochs 30 --log_interval 20 --learning_rate ${lr} --optimizer_type "adam" \
                >> ${expdir}/training.log 2>&1
 
 
