@@ -25,7 +25,8 @@ ffn_dim=$4
 dp=$5
 lr=$6
 context_size=$7
-expdir=/data/sls/scratch/clai24/word-seg/codebook-learning/exp/debug_collection/contextsize${context_size}_dmodel${d_model}_enclayer${num_encoder_layers}_declayer${num_decoder_layers}_ffn_dim${ffn_dim}_dp${dp}_lr${lr}
+labelsmooth=$8
+expdir=/data/sls/scratch/clai24/word-seg/codebook-learning/exp/debug_collection/contextsize${context_size}_dmodel${d_model}_enclayer${num_encoder_layers}_declayer${num_decoder_layers}_ffn_dim${ffn_dim}_dp${dp}_lr${lr}_labelsmooth${labelsmooth}
 mkdir -p ${expdir}
 
 CUDA_LAUNCH_BLOCKING=1 python main.py \
@@ -36,7 +37,7 @@ CUDA_LAUNCH_BLOCKING=1 python main.py \
                --batch_size 64 \
                --segment_context_size ${context_size} \
                --vocab_size 1027 --d_model ${d_model} --nhead 8 --num_encoder_layers ${num_encoder_layers} --num_decoder_layers ${num_decoder_layers} --dim_feedforward ${ffn_dim} \
-               --dropout ${dp} --max_seq_length 130 --epochs 30 --log_interval 20 --learning_rate ${lr} --optimizer_type "adam" \
+               --dropout ${dp} --max_seq_length 130 --epochs 30 --log_interval 20 --learning_rate ${lr} --optimizer_type "adam" --label_smoothing $labelsmooth \
                >> ${expdir}/training.log 2>&1
 
 

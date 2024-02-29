@@ -17,7 +17,7 @@ if [ $stage -eq 0 ]; then
                --batch_size 32 \
                --segment_context_size 7 \
                --vocab_size 1027 --d_model 512 --nhead 8 --num_encoder_layers 3 --num_decoder_layers 3 --dim_feedforward 2048 \
-               --dropout 0.1 --max_seq_length 130 --epochs 10 --log_interval 20 --learning_rate 1e-4 --optimizer_type "adam"
+               --dropout 0.1 --max_seq_length 130 --epochs 10 --log_interval 20 --learning_rate 1e-4 --optimizer_type "adam" --label_smoothing 0.1
 fi 
 
 if [ $stage -eq 1 ]; then 
@@ -32,5 +32,5 @@ if [ $stage -eq 1 ]; then
                --batch_size 1 \
                --segment_context_size 5 \
                --vocab_size 1027 --d_model 512 --nhead 8 --num_encoder_layers 5 --num_decoder_layers 1 --dim_feedforward 2048 \
-               --dropout 0.1 --max_seq_length 130 --epochs 10 --log_interval 20 --learning_rate 1e-3 --optimizer_type "adam"
+               --dropout 0.1 --max_seq_length 130 --epochs 10 --log_interval 20 --learning_rate 1e-3 --optimizer_type "adam" --label_smoothing 0.0
 fi 

@@ -50,6 +50,8 @@ def parse_args():
     parser.add_argument("--dim_feedforward", type=int, default=2048, help="Dimension of the feedforward network model.")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout value.")
     parser.add_argument("--max_seq_length", type=int, default=120, help="Maximum sequence length.")
+    parser.add_argument("--label_smoothing", type=float, default=0.0,
+                        help="Label smoothing parameter between 0 and 1. 0 disables label smoothing.")
 
     # Training specifics
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs for training')
@@ -153,9 +155,11 @@ def main():
         dropout=args.dropout,
         max_seq_length=args.max_seq_length,
         lr=args.learning_rate,
+        label_smoothing=args.label_smoothing, 
         optimizer_type=args.optimizer_type, 
         logger=logger, 
     )
+
     model = model.to(device)
     model.load_model(args.load_model_path)
 

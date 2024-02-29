@@ -22,6 +22,7 @@ class TestSpeechTransformerModel(unittest.TestCase):
         self.num_decoder_layers = 3
         self.dim_feedforward = 2048
         self.dropout = 0.1
+        self.label_smoothing = 0.1
         self.max_seq_length = 120
         self.learning_rate = 0.01
         self.optimizer_type = "adam"
@@ -36,6 +37,7 @@ class TestSpeechTransformerModel(unittest.TestCase):
             dim_feedforward=self.dim_feedforward,
             dropout=self.dropout,
             max_seq_length=self.max_seq_length,
+            label_smoothing=self.label_smoothing, 
             lr=self.learning_rate,
             optimizer_type=self.optimizer_type
         )

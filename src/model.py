@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import math
 
+from src.modules import LabelSmoothingCrossEntropyLoss
 from src.util import calculate_accuracy
 
 # Configure the logger
@@ -92,9 +93,10 @@ class SpeechTransformerModel(nn.Module):
         dropout (float): The dropout value.
         max_seq_length (int): The maximum sequence length.
         lr (float): The learning rate for the optimizer.
+        label_smoothing (float): The `\alpha` in LabelSmoothingCrossEntropyLoss.
         optimizer_type (str): The type of optimizer to use ('sgd' or 'adam').
     """
-    def __init__(self, vocab_size, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, max_seq_length, lr, optimizer_type="sgd", logger=None):
+    def __init__(self, vocab_size, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, max_seq_length, lr, label_smoothing=0.0, optimizer_type="sgd", logger=None):
         super(SpeechTransformerModel, self).__init__()
 
         self.logger = logger or logging.getLogger('SpeechTransformerModel')
@@ -113,8 +115,13 @@ class SpeechTransformerModel(nn.Module):
             raise ValueError("Unsupported optimizer type provided. Choose either 'sgd' or 'adam'.")
 
         # Loss function
-        self.criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)  
-
+        if label_smoothing > 0: 
+            self.criterion = LabelSmoothingCrossEntropyLoss(alpha=label_smoothing, ignore_index=PAD_TOKEN)
+            self.logger.info(f"Using Label Smoothing CrossEntropyLoss with alpha={label_smoothing}")
+        else: # default to standard CE loss 
+            self.criterion = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
+            self.logger.info("Using standard CrossEntropyLoss")
+        
         # Print parameters after initialization
         self.print_parameters()
 
