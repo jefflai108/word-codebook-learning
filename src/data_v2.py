@@ -1,8 +1,5 @@
-import os
 import random
-from dataclasses import dataclass, field
 import scipy
-import h5py 
 import numpy as np 
 import torch
 import torch.nn.functional as F
@@ -43,7 +40,7 @@ def read_word_seg_features(pth):
     return utt2boundaries
 
 
-class Flicker8kSpokencocoSpeechDataset(Dataset):
+class Flicker8kSpeechDataset(Dataset):
     """
     A dataset class for handling the Flicker8k speech data, designed to support 
     training, evaluation, and inference modes for models that work with speech representations, 
@@ -80,7 +77,7 @@ class Flicker8kSpokencocoSpeechDataset(Dataset):
     data for downstream prediction tasks.
 
     Example:
-        >>> dataset = Flicker8kSpokencocoSpeechDataset(token_file_path='path/to/tokens.txt',
+        >>> dataset = Flicker8kSpeechDataset(token_file_path='path/to/tokens.txt',
                                              embed_file_path='path/to/embeds.npy',
                                              word_seg_file_path='path/to/seg_features.txt',
                                              segment_context_size=2)
@@ -92,30 +89,17 @@ class Flicker8kSpokencocoSpeechDataset(Dataset):
     while `Y` comprises sequences of discrete tokens (as 2D tensor) from neighboring segments, reflecting the 
     dataset's utility in modeling both continuous speech features and discrete linguistic tokens.
     """
-    def __init__(self, token_file_path, embed_file_paths, word_seg_file_path, ground_truth_word_seg=True, max_seq_len=512):
+    def __init__(self, token_file_path, embed_file_path, word_seg_file_path, ground_truth_word_seg=True, max_seq_len=512):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.tokens = parse_data(token_file_path)
-        self.open_embed_files(embed_file_paths)
+        self.representations = np.load(embed_file_path, allow_pickle=True)
         #self.waveforms = np.load(waveform_file_path, allow_pickle=True)
         #self.repre_layer_indexes = int(repre_layer_indexes) # [0, 25] as 0 is CNN outputs
         #self.setup_representation_extractor(representation_path)
         self.utt2boundaries = None if word_seg_file_path is None else read_word_seg_features(word_seg_file_path)
         self.ground_truth_word_seg = ground_truth_word_seg
         self.max_seq_len = max_seq_len - 2 # account for SOS and BOS token
-
-    def open_embed_files(self, embed_file_paths):
-        self.representations = []
-        for embed_file_path in embed_file_paths:
-            _, file_extension = os.path.splitext(embed_file_path)
-            if file_extension == '.npz':
-                data = np.load(embed_file_path, allow_pickle=True)
-                self.representations.append(data)
-            elif file_extension == '.hdf5' or file_extension == '.h5':
-                data = h5py.File(embed_file_path, 'r')
-                self.representations.append(data)
-            else:
-                raise ValueError(f"Unsupported file format: {file_extension}")
 
     #def setup_representation_extractor(self, representation_path): 
     #    self.repre_main_model = AutoModel.from_pretrained(representation_path)
@@ -148,20 +132,7 @@ class Flicker8kSpokencocoSpeechDataset(Dataset):
         uttid, tokens = self.tokens[idx]
         #waveform = self.waveforms[uttid]
         #repre_tensor = self.extract_pretrained_repre(waveform)
-
-        if len(self.representations) == 1: 
-            repre_tensor = torch.tensor(self.representations[0][uttid])
-        else: 
-            representations = []
-            for representation_file in self.representations:
-                data = np.array(representation_file[uttid])
-                representations.append(data)
-            # Concatenate along the feature dimension
-            concatenated_representation = np.concatenate(representations, axis=1)
-            
-            # Convert to tensor
-            repre_tensor = torch.tensor(concatenated_representation, dtype=torch.float)
-
+        repre_tensor = torch.tensor(self.representations[uttid])
         tokens_tensor = torch.tensor(tokens, dtype=torch.long)
 
         if self.utt2boundaries is None: 
@@ -279,11 +250,10 @@ def collate_fn(batch):
 
     # futher limit the number of segments to 1k per batch to avoid GPU mem error 
     # this likely won't be a concern for non-determistic inference results as we set the inference batch_size=1 
-    max_samples = 1000 * 1024 
-    max_batches = max_samples // feature_size_x
-    if X_flattened.size(0) > max_batches:
-        # Randomly select max_batches indices
-        indices = torch.randperm(X_flattened.size(0))[:max_batches]
+    max_samples = 1000 
+    if X_flattened.size(0) > max_samples:
+        # Randomly select max_samples indices
+        indices = torch.randperm(X_flattened.size(0))[:max_samples]
 
         # Apply the same selection to both X and Y
         X_flattened = X_flattened[indices]
@@ -309,43 +279,35 @@ def collate_fn(batch):
     #print(X_flattened.shape, Y_flattened.shape)
     return uttids, X_flattened, Y_flattened, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask
 
-@dataclass
-class DatasetConfig:
-    token_file_path: str = ''
-    embed_file_paths: list = field(default_factory=list)
-    word_seg_file_path: str = ''
-    batch_size: int = 32
-    max_seq_length: int = 100
-    shuffle: bool = False  # Typically, shuffling is not needed for inference, default to False
-    num_workers: int = 2  # Default to using 2 workers for loading data
-
-def get_train_loader(config: DatasetConfig):
-    dataset = Flicker8kSpokencocoSpeechDataset(
-        token_file_path=config.token_file_path,
-        embed_file_paths=config.embed_file_paths,
-        word_seg_file_path=config.word_seg_file_path,
-        ground_truth_word_seg=True,
-        max_seq_len=config.max_seq_length
+def get_train_loader(token_file_path, embed_file_path, word_seg_file_path, batch_size=128, shuffle=True, num_workers=2, max_seq_len=512):
+    dataset = Flicker8kSpeechDataset(
+        token_file_path=token_file_path, 
+        embed_file_path=embed_file_path, 
+        word_seg_file_path=word_seg_file_path, 
+        ground_truth_word_seg=True, 
+        max_seq_len=max_seq_len, 
     )
-    return DataLoader(dataset, batch_size=config.batch_size, shuffle=config.shuffle, num_workers=config.num_workers, pin_memory=True, collate_fn=collate_fn)
 
-def get_eval_loader(config: DatasetConfig):
-    dataset = Flicker8kSpokencocoSpeechDataset(
-        token_file_path=config.token_file_path,
-        embed_file_paths=config.embed_file_paths,
-        word_seg_file_path=config.word_seg_file_path,
-        ground_truth_word_seg=True,
-        max_seq_len=config.max_seq_length
-    )
-    return DataLoader(dataset, batch_size=config.batch_size, shuffle=config.shuffle, num_workers=config.num_workers, pin_memory=True, collate_fn=collate_fn)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)
 
-def get_inference_loader(config: DatasetConfig):
-    dataset = Flicker8kSpokencocoSpeechDataset(
-        token_file_path=config.token_file_path,
-        embed_file_paths=config.embed_file_paths,
-        word_seg_file_path=config.word_seg_file_path,
-        ground_truth_word_seg=True,
-        max_seq_len=config.max_seq_length
+def get_eval_loader(token_file_path, embed_file_path, word_seg_file_path, batch_size=128, shuffle=False, num_workers=2, max_seq_len=512):
+    dataset = Flicker8kSpeechDataset(
+        token_file_path=token_file_path, 
+        embed_file_path=embed_file_path, 
+        word_seg_file_path=word_seg_file_path, 
+        ground_truth_word_seg=True, 
+        max_seq_len=max_seq_len, 
     )
-    return DataLoader(dataset, batch_size=config.batch_size, shuffle=config.shuffle, num_workers=config.num_workers, pin_memory=True, collate_fn=collate_fn)
+
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)
+
+def get_inference_loader(token_file_path, embed_file_path, word_seg_file_path, batch_size=128, shuffle=False, num_workers=2, max_seq_len=512):
+    dataset = Flicker8kSpeechDataset(
+        token_file_path=token_file_path, 
+        embed_file_path=embed_file_path, 
+        word_seg_file_path=word_seg_file_path, 
+        ground_truth_word_seg=True, 
+        max_seq_len=max_seq_len, 
+    )
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)
 

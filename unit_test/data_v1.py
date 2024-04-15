@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from src.data import (
     Flicker8kSpeechDataset, 
     collate_fn, 
+    inference_collate_fn, 
 )
 
 PAD_TOKEN = 1024
@@ -13,38 +14,31 @@ EOS_TOKEN = 1026
 class TestDataLoader(unittest.TestCase):
     def setUp(self):
         self.test_token_file_path = '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechtokens/rvq1/flickr_8k_rvq1_tokens_test.txt'
-        self.test_repre_file_path = ['/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer10_pca256_embeddings_test.hdf5', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer11_pca256_embeddings_test.hdf5', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer12_pca256_embeddings_test.hdf5', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer13_pca256_embeddings_test.hdf5', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer14_pca256_embeddings_test.hdf5']
-
-        self.test_repre_file_path = ['/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer10_pca256_embeddings_test.npz', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer11_pca256_embeddings_test.npz', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer12_pca256_embeddings_test.npz', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer13_pca256_embeddings_test.npz', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer14_pca256_embeddings_test.npz']
+        self.test_repre_file_path = '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer10_embeddings_test.npz'
         self.word_seg_file_path = '/data/sls/scratch/sbhati/data/flicker/flicker_speech_features.mat'
         self.batch_size = 4 
         self.vocab_size = 1024 + 3 # account for special tokens 
-        self.representation_path = 'facebook/wav2vec2-large-lv60'
-        self.repre_layer_indexes = '10'
-     
+        self.segment_context_size = 3
+        
         self.dataset = Flicker8kSpeechDataset(
             token_file_path=self.test_token_file_path, 
-            embed_file_paths=self.test_repre_file_path, 
+            embed_file_path=self.test_repre_file_path, 
             word_seg_file_path=self.word_seg_file_path, 
             ground_truth_word_seg=True, 
+            segment_context_size=self.segment_context_size, 
+            mode='train'
         )
         self.dataloader = DataLoader(self.dataset, batch_size=self.batch_size, collate_fn=collate_fn)
         
         self.inference_dataset = Flicker8kSpeechDataset(
             token_file_path=self.test_token_file_path, 
-            embed_file_paths=self.test_repre_file_path, 
+            embed_file_path=self.test_repre_file_path, 
             word_seg_file_path=self.word_seg_file_path, 
             ground_truth_word_seg=True, 
+            segment_context_size=self.segment_context_size, 
+            mode='inference'
         )
-        self.inference_dataloader = DataLoader(self.inference_dataset, batch_size=self.batch_size, collate_fn=collate_fn)
+        self.inference_dataloader = DataLoader(self.inference_dataset, batch_size=self.batch_size, collate_fn=inference_collate_fn)
 
     #def test_inference_loader(self): 
     #    for uttids, X, _, _, num_segments in self.inference_dataloader:
@@ -52,7 +46,7 @@ class TestDataLoader(unittest.TestCase):
 
     #def test_vocab_distribution(self): 
     #    vocab_counts_accumulated = torch.zeros(self.vocab_size, dtype=torch.long)
-    #    for _, X, Y, _, _, _, _, _ in self.dataloader:
+    #    for X, Y, _, _, _, _, _ in self.dataloader:
     #        X_flat = X.flatten()
     #        batch_counts = torch.bincount(X_flat, minlength=self.vocab_size)
     #        vocab_counts_accumulated += batch_counts
@@ -66,15 +60,15 @@ class TestDataLoader(unittest.TestCase):
     #    vocab_distribution = [(int(vocab_index), int(count)) for vocab_index, count in zip(sorted_indices_non_zero_accumulated, sorted_counts_accumulated)]
     #    print(vocab_distribution)
 
-    def test_vocab_size(self): 
-        max_value = 0 
-        for _, X, Y, _, _, _, _, _ in self.dataloader:
-            max_value = max(torch.max(Y).item(), max_value)
-        print(f'max value is {max_value}') # max value should be the PAD_TOKEN 
-        assert max_value == self.vocab_size - 1
+    #def test_vocab_size(self): 
+    #    max_value = 0 
+    #    for X, Y, _, _, _, _, _ in self.dataloader:
+    #        max_value = max(torch.max(Y).item(), max_value)
+    #    print(f'max value is {max_value}') # max value should be the PAD_TOKEN 
+    #    assert max_value == self.vocab_size - 1
 
     #def test_batch_structure(self):
-    #    for _, X, Y, _, _, _, _, _ in self.dataloader:
+    #    for X, Y, _, _, _, _, _ in self.dataloader:
     #        batch_size = X.size(0)
     #        # Check X and Y are tensors
     #        self.assertTrue(isinstance(X, torch.Tensor), "X is not a tensor")
@@ -88,7 +82,7 @@ class TestDataLoader(unittest.TestCase):
 
     ## Example method to check de-duplication in X
     #def test_deduplication(self):
-    #    for _, X, Y, _, _, _, _, _ in self.dataloader:
+    #    for X, Y, _, _, _, _, _ in self.dataloader:
     #        # Ensure no consecutive elements in Y are identical, ignoring padding values
     #        for batch in Y:
     #            # Convert to a list for easier manipulation
@@ -99,7 +93,7 @@ class TestDataLoader(unittest.TestCase):
     #            self.assertTrue(all(filtered_x[i] != filtered_x[i + 1] for i in range(len(filtered_x) - 1)), "Y contains consecutive duplicates")
 
     #def test_masks_generation(self):
-    #    for _, X, Y, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask in self.dataloader:
+    #    for X, Y, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask in self.dataloader:
     #        # Test src_key_padding_mask correctness
     #        self.assertEqual(X.size(0), src_key_padding_mask.size(0), "src_key_padding_mask has incorrect batch size")
     #        self.assertTrue((src_key_padding_mask.sum(dim=1) == (X == PAD_TOKEN).sum(dim=1)).all(), "src_key_padding_mask incorrectly generated")

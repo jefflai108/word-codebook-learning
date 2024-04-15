@@ -1,6 +1,5 @@
 import os
 import random
-from dataclasses import dataclass, field
 import scipy
 import h5py 
 import numpy as np 
@@ -43,7 +42,7 @@ def read_word_seg_features(pth):
     return utt2boundaries
 
 
-class Flicker8kSpokencocoSpeechDataset(Dataset):
+class Flicker8kSpeechDataset(Dataset):
     """
     A dataset class for handling the Flicker8k speech data, designed to support 
     training, evaluation, and inference modes for models that work with speech representations, 
@@ -80,7 +79,7 @@ class Flicker8kSpokencocoSpeechDataset(Dataset):
     data for downstream prediction tasks.
 
     Example:
-        >>> dataset = Flicker8kSpokencocoSpeechDataset(token_file_path='path/to/tokens.txt',
+        >>> dataset = Flicker8kSpeechDataset(token_file_path='path/to/tokens.txt',
                                              embed_file_path='path/to/embeds.npy',
                                              word_seg_file_path='path/to/seg_features.txt',
                                              segment_context_size=2)
@@ -309,43 +308,35 @@ def collate_fn(batch):
     #print(X_flattened.shape, Y_flattened.shape)
     return uttids, X_flattened, Y_flattened, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask
 
-@dataclass
-class DatasetConfig:
-    token_file_path: str = ''
-    embed_file_paths: list = field(default_factory=list)
-    word_seg_file_path: str = ''
-    batch_size: int = 32
-    max_seq_length: int = 100
-    shuffle: bool = False  # Typically, shuffling is not needed for inference, default to False
-    num_workers: int = 2  # Default to using 2 workers for loading data
-
-def get_train_loader(config: DatasetConfig):
-    dataset = Flicker8kSpokencocoSpeechDataset(
-        token_file_path=config.token_file_path,
-        embed_file_paths=config.embed_file_paths,
-        word_seg_file_path=config.word_seg_file_path,
-        ground_truth_word_seg=True,
-        max_seq_len=config.max_seq_length
+def get_train_loader(token_file_path, embed_file_paths, word_seg_file_path, batch_size=128, shuffle=True, num_workers=2, max_seq_len=512):
+    dataset = Flicker8kSpeechDataset(
+        token_file_path=token_file_path, 
+        embed_file_paths=embed_file_paths, 
+        word_seg_file_path=word_seg_file_path, 
+        ground_truth_word_seg=True, 
+        max_seq_len=max_seq_len, 
     )
-    return DataLoader(dataset, batch_size=config.batch_size, shuffle=config.shuffle, num_workers=config.num_workers, pin_memory=True, collate_fn=collate_fn)
 
-def get_eval_loader(config: DatasetConfig):
-    dataset = Flicker8kSpokencocoSpeechDataset(
-        token_file_path=config.token_file_path,
-        embed_file_paths=config.embed_file_paths,
-        word_seg_file_path=config.word_seg_file_path,
-        ground_truth_word_seg=True,
-        max_seq_len=config.max_seq_length
-    )
-    return DataLoader(dataset, batch_size=config.batch_size, shuffle=config.shuffle, num_workers=config.num_workers, pin_memory=True, collate_fn=collate_fn)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)
 
-def get_inference_loader(config: DatasetConfig):
-    dataset = Flicker8kSpokencocoSpeechDataset(
-        token_file_path=config.token_file_path,
-        embed_file_paths=config.embed_file_paths,
-        word_seg_file_path=config.word_seg_file_path,
-        ground_truth_word_seg=True,
-        max_seq_len=config.max_seq_length
+def get_eval_loader(token_file_path, embed_file_paths, word_seg_file_path, batch_size=128, shuffle=False, num_workers=2, max_seq_len=512):
+    dataset = Flicker8kSpeechDataset(
+        token_file_path=token_file_path, 
+        embed_file_paths=embed_file_paths, 
+        word_seg_file_path=word_seg_file_path, 
+        ground_truth_word_seg=True, 
+        max_seq_len=max_seq_len, 
     )
-    return DataLoader(dataset, batch_size=config.batch_size, shuffle=config.shuffle, num_workers=config.num_workers, pin_memory=True, collate_fn=collate_fn)
+
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)
+
+def get_inference_loader(token_file_path, embed_file_paths, word_seg_file_path, batch_size=128, shuffle=False, num_workers=2, max_seq_len=512):
+    dataset = Flicker8kSpeechDataset(
+        token_file_path=token_file_path, 
+        embed_file_paths=embed_file_paths, 
+        word_seg_file_path=word_seg_file_path, 
+        ground_truth_word_seg=True, 
+        max_seq_len=max_seq_len, 
+    )
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True, collate_fn=collate_fn)
 

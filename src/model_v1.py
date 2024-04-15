@@ -2,16 +2,10 @@ import logging, os
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import math
 
-from src.modules import (
-    LabelSmoothingCrossEntropyLoss, 
-    LearnedWeightedPooling, 
-    AdaptiveConv1DPooling, 
-    LearnableDictionaryEncoding, 
-) 
+from src.modules import LabelSmoothingCrossEntropyLoss
 from src.util import calculate_accuracy
 
 # Configure the logger
@@ -39,13 +33,13 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 class TransformerEncoderModule(nn.Module):
-    def __init__(self, input_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, max_seq_length, activation):
+    def __init__(self, input_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, max_seq_length):
         super(TransformerEncoderModule, self).__init__()
         self.d_model = d_model
         # Initialize the linear layer for processing continuous embeddings
         self.input_linear = nn.Linear(input_dim, d_model, bias=False)
         self.pos_encoder = PositionalEncoding(d_model, dropout, max_seq_length)
-        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
+        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_encoder_layers)
 
     def forward(self, src, src_mask, src_key_padding_mask):
@@ -56,11 +50,11 @@ class TransformerEncoderModule(nn.Module):
         return output
 
 class TransformerDecoderModule(nn.Module):
-    def __init__(self, embedding, d_model, nhead, num_decoder_layers, dim_feedforward, dropout, max_seq_length, vocab_size, activation):
+    def __init__(self, embedding, d_model, nhead, num_decoder_layers, dim_feedforward, dropout, max_seq_length, vocab_size):
         super(TransformerDecoderModule, self).__init__()
         self.embedding = embedding
         self.pos_decoder = PositionalEncoding(d_model, dropout, max_seq_length)
-        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
+        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)
         self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_decoder_layers)
         self.head = nn.Linear(d_model, vocab_size)
         self.d_model = d_model
@@ -104,28 +98,14 @@ class SpeechTransformerModel(nn.Module):
         label_smoothing (float): The `\alpha` in LabelSmoothingCrossEntropyLoss.
         optimizer_type (str): The type of optimizer to use ('sgd' or 'adam').
     """
-    def __init__(self, vocab_size, input_dim, num_layer_repre, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, max_seq_length, lr, activation='relu', word_pooling='mean', label_smoothing=0.0, optimizer_type="sgd", logger=None):
+    def __init__(self, vocab_size, input_dim, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, max_seq_length, lr, label_smoothing=0.0, optimizer_type="sgd", logger=None):
         super(SpeechTransformerModel, self).__init__()
 
         self.logger = logger or logging.getLogger('SpeechTransformerModel')
         self.shared_embedding = nn.Embedding(vocab_size, d_model)
-        self.num_layer_repre = num_layer_repre # M layer input repre, each has `input_dim` dim
-        if num_layer_repre > 1: 
-            self.layer_weights = nn.Parameter(torch.randn(self.num_layer_repre))
-        self.encoder = TransformerEncoderModule(input_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, max_seq_length, activation)
-        self.decoder = TransformerDecoderModule(self.shared_embedding, d_model, nhead, num_decoder_layers, dim_feedforward, dropout, max_seq_length, vocab_size, activation)
-        self.word_pooling = word_pooling
-        if self.word_pooling == 'weighted_mean': 
-            self.word_pooling_layer = LearnedWeightedPooling(d_model) 
-        elif self.word_pooling == 'conv_mean': 
-            self.word_pooling_layer = AdaptiveConv1DPooling(d_model) 
-        elif self.word_pooling == 'lde8': 
-            self.word_pooling_layer = LearnableDictionaryEncoding(d_model, 8)
-        elif self.word_pooling == 'lde16': 
-            self.word_pooling_layer = LearnableDictionaryEncoding(d_model, 16)
-        elif self.word_pooling == 'lde32': 
-            self.word_pooling_layer = LearnableDictionaryEncoding(d_model, 32)
-
+        self.encoder = TransformerEncoderModule(input_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, max_seq_length)
+        self.decoder = TransformerDecoderModule(self.shared_embedding, d_model, nhead, num_decoder_layers, dim_feedforward, dropout, max_seq_length, vocab_size)
+        
         self.init_weights()
 
         # Optimizer selection
@@ -158,10 +138,6 @@ class SpeechTransformerModel(nn.Module):
         initrange = 0.1
         self.shared_embedding.weight.data.uniform_(-initrange, initrange)
         self.decoder.init_weights()
-
-        if self.num_layer_repre > 1: 
-            # init weighted sum layer to all 1s 
-            torch.nn.init.constant_(self.layer_weights, 1.0)  
 
     def encoder_masked_avg_pooling(self, encoder_output, src_key_padding_mask):
         """
@@ -203,25 +179,6 @@ class SpeechTransformerModel(nn.Module):
         masked_avg = sum_pool / valid_counts
         
         return masked_avg
-   
-    def repre_weighted_sum(self, input_repre): 
-        """
-        (normalized) weighted sum across input repres
-        """
-        seq_len, batch_size, _ = input_repre.size()
-        # Reshape and permute input_repre to prepare for weighted sum
-        input_repre = input_repre.view(seq_len, batch_size, self.num_layer_repre, -1)
-        input_repre = input_repre.permute(0, 1, 3, 2)  # Bringing num_layer_repre to the last for easy multiplication
-
-        # Normalize weights to sum to 1 using softmax
-        norm_weights = F.softmax(self.layer_weights, dim=-1)
-
-        # Apply weights and sum across the repre dimension
-        # Note: Ensure norm_weights is correctly broadcastable to match input_repre's dimensions for multiplication
-        # Output shape after weights_layer [seq_len, batch_size, input_dim]
-        weighted_input_repre = (norm_weights.unsqueeze(0).unsqueeze(0).unsqueeze(-2) * input_repre).sum(dim=-1)
-
-        return weighted_input_repre
 
     def forward(self, src, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):
         """
@@ -239,22 +196,17 @@ class SpeechTransformerModel(nn.Module):
         Returns:
             Tensor: The output of the decoder.
         """
-        if self.num_layer_repre > 1:
-            # apply weighted sum (as in SUPERB's series) across different layer repres 
-            src = self.repre_weighted_sum(src) 
-
         encoder_output = self.encoder(src, src_mask, src_key_padding_mask) # [seq_len, batch_size, hidden_dim]
+        # Use the masked_avg_pooling method for pooling encoder outputs to a single representation
+        pooled_output = self.encoder_masked_avg_pooling(encoder_output, src_key_padding_mask) # [batch_size, hidden_dim]
 
-        # obtain segment-level representation from encoder_output sequences. 
-        # pooled_output is of shape [batch_size, hidden_dim]
-        if self.word_pooling == 'mean': 
-            pooled_output = self.encoder_masked_avg_pooling(encoder_output, src_key_padding_mask) 
-        else: # 'weighted_mean' / 'conv_mean' / 'lde'
-            pooled_output = self.word_pooling_layer(encoder_output, src_key_padding_mask)
-
-        pooled_output = pooled_output.unsqueeze(0)
-        output = self.decoder(tgt, pooled_output, tgt_mask, tgt_key_padding_mask, None) # need to adjust the "None" if pooled_output's seq_len is not 1 (to avoid attending to padded parts). But if seq_len is consistent / fixed across batches , then it's ok 
-
+        context_size = tgt.size(1) // encoder_output.size(1)
+        pooled_output_expanded = pooled_output.repeat_interleave(context_size, dim=0) # repeat by context size
+        memory_key_padding_mask = memory_key_padding_mask.repeat_interleave(context_size, dim=0) # repeat by context size
+        #import pdb; pdb.set_trace()
+        pooled_output_expanded = pooled_output_expanded.unsqueeze(0)
+        output = self.decoder(tgt, pooled_output_expanded, tgt_mask, tgt_key_padding_mask, None)
+        
         return output
 
     def encoder_forward_pass(self, src, src_mask, src_key_padding_mask):
@@ -269,27 +221,13 @@ class SpeechTransformerModel(nn.Module):
         Returns:
             Tensor: The pooled encoder output.
         """
-        if self.num_layer_repre > 1:
-            # apply weighted sum (as in SUPERB's series) across different layer repres 
-            src = self.repre_weighted_sum(src) 
-
-        encoder_output = self.encoder(src, src_mask, src_key_padding_mask) # [seq_len, batch_size, hidden_dim]
-
-        # obtain segment-level representation from encoder_output sequences. 
-        # pooled_output is of shape [batch_size, hidden_dim]
-        if self.word_pooling == 'mean': 
-            pooled_output = self.encoder_masked_avg_pooling(encoder_output, src_key_padding_mask) 
-        else: # 'weighted_mean' / 'conv_mean' / 'lde'
-            pooled_output = self.word_pooling_layer(encoder_output, src_key_padding_mask)
-
+        encoder_output = self.encoder(src, src_mask, src_key_padding_mask)
+        pooled_output = self.encoder_masked_avg_pooling(encoder_output, src_key_padding_mask) # [batch_size, hidden_dim]
         return pooled_output
 
-    def train_step(self, src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask, current_step, accumulation_steps=4):
+    def train_step(self, src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):
         """
-        Performs a single training step, incorporating gradient accumulation and accuracy calculation. 
-        This method allows for simulating larger batch sizes by accumulating gradients over multiple steps, which is particularly 
-        useful when hardware resources limit the maximum feasible batch size. After the specified number of accumulation 
-        steps, it performs an optimization step and resets the gradients.
+        Performs a single training step, including forward pass, loss calculation, backpropagation, and optimization.
 
         Parameters:
         - src (Tensor): Source sequences tensor with shape (seq_len, batch_size).
@@ -300,43 +238,37 @@ class SpeechTransformerModel(nn.Module):
         - src_key_padding_mask (Tensor): Source key padding mask tensor.
         - tgt_key_padding_mask (Tensor): Target key padding mask tensor.
         - memory_key_padding_mask (Tensor): Memory key padding mask tensor for attention mechanisms.
-        - current_step (int): The current step number in the training loop.
-        - accumulation_steps (int): The number of steps over which to accumulate gradients.
+
+        The method computes the model's output, reshapes it for loss calculation, computes the loss, and performs a backward pass to update the model's parameters. 
+        Gradient clipping is applied to prevent exploding gradients. Finally, it calculates and returns the loss and accuracy of the predictions.
 
         Returns:
-        - loss_value (float): The value of the loss for this step, scaled back to represent the actual loss over the accumulation period.
-        - accuracy (float): The accuracy of the predictions for the current step.
-
-        Note:
-        - The optimization step and gradient zeroing occur only after the specified number of accumulation steps.
+        - A tuple containing:
+            - The loss value as a float.
+            - A tuple with the accuracy of the predictions and the number of correct predictions.
         """
         self.train()
+        self.optimizer.zero_grad()
         
         # Forward pass
         output = self.forward(src, tgt_input, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask)
-        
+
         # Reshape for loss calculation
         output_reshaped = output.reshape(-1, output.size(-1))
         tgt_reshaped = tgt.reshape(-1)
-        
-        # Compute loss and scale it for gradient accumulation
-        loss = self.criterion(output_reshaped, tgt_reshaped) / accumulation_steps
-        
-        # Backpropagate the scaled loss
-        loss.backward()
-        
-        # Accumulate gradients and perform optimization step at specified intervals
-        if current_step % accumulation_steps == 0:
-            nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
-            self.optimizer.step()
-            self.optimizer.zero_grad()
-        
-        # Calculate accuracy (this can be optionally accumulated or calculated at each step)
+
+        total_loss = self.criterion(output_reshaped, tgt_reshaped)
+
+        # Backpropagate the total loss
+        total_loss.backward()
+        nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+        self.optimizer.step()
+
+        # Calculate accuracy
         with torch.no_grad():
             accuracy, predictions, ground_truths = calculate_accuracy(output_reshaped, tgt_reshaped, PAD_TOKEN)
-
-        # Scale the loss back up to represent the total loss over the accumulated steps for logging or monitoring
-        return loss.item() * accumulation_steps, (accuracy, predictions, ground_truths)
+        
+        return total_loss.item(), (accuracy, predictions, ground_truths)
 
     def eval_step(self, src, tgt_input, tgt, src_mask, tgt_mask, src_key_padding_mask, tgt_key_padding_mask, memory_key_padding_mask):
         """
@@ -396,28 +328,15 @@ class SpeechTransformerModel(nn.Module):
 
     def greedy_decode_step(self, src, src_mask, src_key_padding_mask, max_length=50):
         """
-        Performs greedy decoding on the input source sequences using the model's encoder and decoder
-        architectures. The method continues decoding until either the maximum specified length is reached
-        or an EOS_TOKEN is generated, indicating the end of a sequence. Post EOS_TOKEN generation, further
-        tokens are replaced with PAD_TOKEN to maintain tensor sizes without affecting sequence integrity.
+        Greedy decoding implementation for the model, handling variable output length with EOS_TOKEN detection.
 
         Parameters:
-        - src (Tensor): The input tensor containing the source sequences. Shape is typically [seq_len, batch_size].
-        - src_mask (Tensor): The mask for the source sequences, used in the attention mechanism of the encoder.
-        - src_key_padding_mask (Tensor): The padding mask for the source sequences, indicating which elements
-                                         are padding and should be ignored by the attention mechanisms.
+        - src (Tensor): The source sequence.
+        - src_mask (Tensor): The source mask.
+        - src_key_padding_mask (Tensor): The source key padding mask.
 
         Returns:
-        - Tensor: The tensor containing the generated sequences for each input in the batch. The sequences include
-                  the initial SOS_TOKEN and are terminated by the first EOS_TOKEN. Any subsequent positions after
-                  the EOS_TOKEN are filled with PAD_TOKENs to align with the longest sequence in the batch.
-
-        Note:
-        - The decoding process in each iteration predicts the next token based on the current state of the target
-          tensor (tgt), which initially starts with SOS_TOKEN and is dynamically updated with each predicted token.
-        - The function ensures that once a sequence generates an EOS_TOKEN, marking the logical end, it is
-          deactivated, and subsequent tokens in the sequence are replaced with PAD_TOKENs, preventing any further
-          meaningful output for that sequence. This ensures the final output correctly represents terminated sequences.
+        - Tensor: The generated sequence.
         """
         max_decoding_steps = max_length - 2
 
@@ -429,12 +348,8 @@ class SpeechTransformerModel(nn.Module):
 
             # Initialize the target tensor with SOS_TOKEN at the first position
             tgt = torch.full((1, src.shape[1]), SOS_TOKEN, dtype=torch.long, device=src.device)
-            generated = tgt.clone()  # Ensure `generated` is a separate tensor
 
-            # Initialize active mask to keep track of sequences still generating new tokens
-            # It indicates if the sequence is still "activte" in generation. 
-            # Once EOS_TOKEN is generated, the sequence deactivates permanently 
-            active = torch.ones(src.shape[1], dtype=torch.bool, device=src.device)
+            generated = tgt
 
             # Continue decoding until EOS_TOKEN is generated
             for _ in range(max_decoding_steps):
@@ -443,28 +358,22 @@ class SpeechTransformerModel(nn.Module):
                 # No tgt_mask for greedy decoding as each step only looks at previously generated tokens
                 output = self.decoder(tgt, pooled_output_expanded, None, None, None)
             
+                
                 # Select the last step's output for next token prediction
                 next_token_logits = output[-1, :, :]  # Get logits of the last token
                 next_token = next_token_logits.argmax(dim=-1, keepdim=True)  # Predict the next token
                 next_token = next_token.transpose(0, 1)
 
-                # Append the predicted token to the generated sequence before any changes below 
-                # this will ensure that the generated EOS_TOKEN is not replaced by PAD_TOKEN
+                # Break the loop if EOS_TOKEN is generated
+                if (next_token == EOS_TOKEN).all():
+                    break
+
+                # Append the predicted token to the generated sequence
                 generated = torch.cat([generated, next_token], dim=0)
-
-                # Check for EOS generation and update active status
-                is_eos_or_pad = (next_token.squeeze(0) == EOS_TOKEN) | (next_token.squeeze(0) == PAD_TOKEN)
-                active[is_eos_or_pad] = False  # Permanently deactivate sequences that generated EOS
-
-                if not active.any():
-                    break  # Stop decoding if all sequences are inactive
-
-                # Replace tokens for inactive sequences with PAD_TOKEN to avoid influencing results
-                next_token[~active, :] = PAD_TOKEN
 
                 # Update tgt with the newly generated token for the next iteration
                 tgt = torch.cat([tgt, next_token], dim=0)
-        
+                
         return generated
 
     def save_model(self, epoch, file_save_path):

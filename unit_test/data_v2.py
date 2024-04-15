@@ -13,17 +13,8 @@ EOS_TOKEN = 1026
 class TestDataLoader(unittest.TestCase):
     def setUp(self):
         self.test_token_file_path = '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechtokens/rvq1/flickr_8k_rvq1_tokens_test.txt'
-        self.test_repre_file_path = ['/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer10_pca256_embeddings_test.hdf5', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer11_pca256_embeddings_test.hdf5', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer12_pca256_embeddings_test.hdf5', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer13_pca256_embeddings_test.hdf5', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/h5_speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer14_pca256_embeddings_test.hdf5']
-
-        self.test_repre_file_path = ['/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer10_pca256_embeddings_test.npz', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer11_pca256_embeddings_test.npz', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer12_pca256_embeddings_test.npz', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer13_pca256_embeddings_test.npz', 
-                                     '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer14_pca256_embeddings_test.npz']
+        self.test_repre_file_path = '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/speechrepresentations/flickr_8k_wav2vec2_large_lv60_layer10_embeddings_test.npz'
+        self.waveform_file_path = '/data/sls/scratch/clai24/word-seg/flicker8k/preprocess/waveforms/flickr_8k_waveforms_test.npz'
         self.word_seg_file_path = '/data/sls/scratch/sbhati/data/flicker/flicker_speech_features.mat'
         self.batch_size = 4 
         self.vocab_size = 1024 + 3 # account for special tokens 
@@ -32,7 +23,7 @@ class TestDataLoader(unittest.TestCase):
      
         self.dataset = Flicker8kSpeechDataset(
             token_file_path=self.test_token_file_path, 
-            embed_file_paths=self.test_repre_file_path, 
+            embed_file_path=self.test_repre_file_path, 
             word_seg_file_path=self.word_seg_file_path, 
             ground_truth_word_seg=True, 
         )
@@ -40,7 +31,7 @@ class TestDataLoader(unittest.TestCase):
         
         self.inference_dataset = Flicker8kSpeechDataset(
             token_file_path=self.test_token_file_path, 
-            embed_file_paths=self.test_repre_file_path, 
+            embed_file_path=self.test_repre_file_path, 
             word_seg_file_path=self.word_seg_file_path, 
             ground_truth_word_seg=True, 
         )
