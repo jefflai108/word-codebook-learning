@@ -104,7 +104,7 @@ class SpeechTransformerModel(nn.Module):
         label_smoothing (float): The `\alpha` in LabelSmoothingCrossEntropyLoss.
         optimizer_type (str): The type of optimizer to use ('sgd' or 'adam').
     """
-    def __init__(self, vocab_size, input_dim, num_layer_repre, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, max_seq_length, lr, activation='relu', word_pooling='mean', label_smoothing=0.0, optimizer_type="sgd", logger=None):
+    def __init__(self, vocab_size, input_dim, num_layer_repre, d_model, nhead, num_encoder_layers, num_decoder_layers, dim_feedforward, dropout, max_seq_length, lr, activation='relu', word_pooling='mean', norm_type='batchnorm', label_smoothing=0.0, optimizer_type="sgd", logger=None):
         super(SpeechTransformerModel, self).__init__()
 
         self.logger = logger or logging.getLogger('SpeechTransformerModel')
@@ -114,6 +114,8 @@ class SpeechTransformerModel(nn.Module):
             self.layer_weights = nn.Parameter(torch.randn(self.num_layer_repre))
         self.encoder = TransformerEncoderModule(input_dim, d_model, nhead, num_encoder_layers, dim_feedforward, dropout, max_seq_length, activation)
         self.decoder = TransformerDecoderModule(self.shared_embedding, d_model, nhead, num_decoder_layers, dim_feedforward, dropout, max_seq_length, vocab_size, activation)
+
+        # init word-pooling 
         self.word_pooling = word_pooling
         if self.word_pooling == 'weighted_mean': 
             self.word_pooling_layer = LearnedWeightedPooling(d_model) 
@@ -126,6 +128,17 @@ class SpeechTransformerModel(nn.Module):
         elif self.word_pooling == 'lde32': 
             self.word_pooling_layer = LearnableDictionaryEncoding(d_model, 32)
 
+        # init word normalization scheme 
+        self.norm_type = norm_type
+        if norm_type == 'batchnorm':
+            self.norm = nn.BatchNorm1d(d_model)
+        elif norm_type == 'instancenorm':
+            self.norm = nn.InstanceNorm1d(d_model)
+        elif norm_type == 'l2norm':
+            self.norm = None  # L2 normalization will be applied manually in forward
+        elif norm_type == 'none':
+            self.norm = None  # No normalization
+
         self.init_weights()
 
         # Optimizer selection
@@ -133,6 +146,8 @@ class SpeechTransformerModel(nn.Module):
             self.optimizer = torch.optim.SGD(self.parameters(), lr=lr, momentum=0)
         elif optimizer_type == "adam":
             self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        elif optimizer_type == "adamw":
+            self.optimizer = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=0.01)
         else:
             raise ValueError("Unsupported optimizer type provided. Choose either 'sgd' or 'adam'.")
 
@@ -252,6 +267,11 @@ class SpeechTransformerModel(nn.Module):
         else: # 'weighted_mean' / 'conv_mean' / 'lde'
             pooled_output = self.word_pooling_layer(encoder_output, src_key_padding_mask)
 
+        if self.norm_type == 'l2norm':
+            pooled_output = F.normalize(pooled_output, p=2, dim=1)  # Apply L2 normalization
+        elif self.norm is not None:
+            pooled_output = self.norm(pooled_output)
+
         pooled_output = pooled_output.unsqueeze(0)
         output = self.decoder(tgt, pooled_output, tgt_mask, tgt_key_padding_mask, None) # need to adjust the "None" if pooled_output's seq_len is not 1 (to avoid attending to padded parts). But if seq_len is consistent / fixed across batches , then it's ok 
 
@@ -281,6 +301,11 @@ class SpeechTransformerModel(nn.Module):
             pooled_output = self.encoder_masked_avg_pooling(encoder_output, src_key_padding_mask) 
         else: # 'weighted_mean' / 'conv_mean' / 'lde'
             pooled_output = self.word_pooling_layer(encoder_output, src_key_padding_mask)
+
+        if self.norm_type == 'l2norm':
+            pooled_output = F.normalize(pooled_output, p=2, dim=1)  # Apply L2 normalization
+        elif self.norm is not None:
+            pooled_output = self.norm(pooled_output)
 
         return pooled_output
 
@@ -466,6 +491,60 @@ class SpeechTransformerModel(nn.Module):
                 tgt = torch.cat([tgt, next_token], dim=0)
         
         return generated
+
+    def beam_search_decode(self, src, src_mask, src_key_padding_mask, max_length=50, beam_width=5):
+        """
+        Performs beam search decoding on the input source sequences. This method maintains multiple
+        hypotheses (beams) and expands each by the possible next tokens at each step of decoding,
+        only keeping the top scoring sequences based on cumulative log probabilities.
+
+        Parameters:
+        - src (Tensor): The input tensor containing the source sequences, shape [seq_len, batch_size].
+        - src_mask (Tensor): The mask for the source sequences, used in the attention mechanism.
+        - src_key_padding_mask (Tensor): The padding mask for the source sequences.
+        - max_length (int): The maximum length of the sequence to decode, including the initial SOS_TOKEN.
+        - beam_width (int): The number of hypotheses to maintain.
+
+        Returns:
+        - Tensor: The tensor containing the best generated sequence for each input in the batch.
+                  Sequences are terminated by the first EOS_TOKEN. Any subsequent positions are
+                  filled with PAD_TOKENs to maintain alignment.
+        """
+        max_decoding_steps = max_length - 2
+
+        self.eval()
+        with torch.no_grad():
+            pooled_output = self.encoder_forward_pass(src, src_mask, src_key_padding_mask)
+            pooled_output_expanded = pooled_output.unsqueeze(0)
+
+            # Initialize beams with the SOS_TOKEN at the start and zero initial score
+            init_token = torch.full((1, src.shape[1]), SOS_TOKEN, dtype=torch.long, device=src.device)
+            beams = [(init_token, 0.0)]  # List of tuples (sequence tensor, cumulative log probability score)
+
+            for step in range(max_decoding_steps):
+                new_beams = []
+                for seq, score in beams:
+                    output = self.decoder(seq, pooled_output_expanded, None, None, None)
+                    next_token_logits = output[-1, :, :]
+                    log_probs, next_tokens = torch.topk(torch.log_softmax(next_token_logits, dim=-1), beam_width)
+
+                    # Expand each current beam by the top-k next possible tokens
+                    for i in range(beam_width):
+                        next_token = next_tokens[:, i].unsqueeze(0).transpose(0, 1)
+                        next_seq = torch.cat([seq, next_token], dim=0)
+                        next_score = score + log_probs[:, i].item()
+                        new_beams.append((next_seq, next_score))
+
+                # Sort all expanded beams and keep only the top k overall
+                beams = sorted(new_beams, key=lambda x: x[1], reverse=True)[:beam_width]
+
+            # Final selection of the best beam based on score and ensuring proper EOS termination
+            completed_beams = [beam for beam in beams if beam[0][-1, 0] == EOS_TOKEN]
+            if not completed_beams:
+                completed_beams = beams  # Fall back to the best available beams if none properly terminate
+            best_sequence = max(completed_beams, key=lambda x: x[1])[0]
+
+            return best_sequence
 
     def save_model(self, epoch, file_save_path):
         if not os.path.exists(os.path.dirname(file_save_path)):

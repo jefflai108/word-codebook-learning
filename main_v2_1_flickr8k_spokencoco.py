@@ -61,19 +61,25 @@ def parse_args():
     parser.add_argument("--model_activation", type=str, default="relu", choices=["relu", "gelu"], help="activation functions used in transformer modules.")
     parser.add_argument("--word_pooling", type=str, default="mean", choices=["mean", "weighted_mean", "conv_mean", "lde8", "lde16", "lde32"], 
                         help="pooling methods over encoder_output to obtain seg repre") 
+    parser.add_argument("--norm_type", type=str, default="batchnorm", choices=["batchnorm", "instancenorm", "l2norm", "none"], 
+                        help="normalization on word embeddings") 
 
     # Training specifics
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs for training')
     parser.add_argument('--log_interval', type=int, default=100, help='Log loss every this many intervals')
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate.")
-    parser.add_argument("--optimizer_type", type=str, default="adam", choices=["adam", "sgd"], help="Optimizer type.")
+    parser.add_argument("--optimizer_type", type=str, default="adamw", choices=["adam", "sgd", "adamw"], help="Optimizer type.")
     parser.add_argument('--gradient_acc_steps', type=int, default=2, help='number of training steps accumulated')
 
     return parser.parse_args()
 
 def adjust_learning_rate(optimizer, step, total_steps, peak_lr, end_lr=1e-6):
-    warmup_steps = int(total_steps * 0.2)  # 20% of total steps for warm-up
-    decay_steps = int(total_steps * 0.8)  # 80% of total steps for decay
+    #warmup_steps = int(total_steps * 0.2)  # 20% of total steps for warm-up
+    #decay_steps = int(total_steps * 0.8)  # 80% of total steps for decay
+
+    # adjusted from (20%, 80%) to (40%, 60%) for our shorter training total epochs 
+    warmup_steps = int(total_steps * 0.4)  # 40% of total steps for warm-up
+    decay_steps = int(total_steps * 0.6)  # 60% of total steps for decay
 
     if step < warmup_steps:
         lr = peak_lr * step / warmup_steps

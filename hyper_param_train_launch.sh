@@ -11,14 +11,17 @@ labelsmooth=$8
 w2v2_large_layerid=$9 
 pca_dim=${10}
 word_pool=${11}
+word_norm=${12}
 
-for pca_dim in 64 128 256 512; do 
+#for pca_dim in 64 128 256 512; do 
+for pca_dim in 128; do # save (256, 512) for satori 
 for label_smooth_alpha in 0.0 0.1 0.2; do 
 for lr in 1e-3 5e-4 1e-4; do 
 for dp in 0.2 0.3; do 
-    sbatch scripts/launch.slurm 256 3 3 1024 ${dp} ${lr} -100 ${label_smooth_alpha} -100 ${pca_dim} "mean" # --> LAUNCHED
-    #sbatch scripts/launch.slurm 512 3 3 2048 ${dp} ${lr} -100 ${label_smooth_alpha} -100 ${pca_dim} "mean"
-    #sbatch scripts/launch.slurm 768 3 3 3072 ${dp} ${lr} -100 ${label_smooth_alpha} -100 ${pca_dim} "mean"
+    sbatch scripts/launch.slurm 256 3 3 1024 ${dp} ${lr} -100 ${label_smooth_alpha} -100 ${pca_dim} "mean" "batchnorm"
+
+    #sbatch scripts/launch.slurm 512 3 3 2048 ${dp} ${lr} -100 ${label_smooth_alpha} -100 ${pca_dim} "mean" "batchnorm"
+    #sbatch scripts/launch.slurm 768 3 3 3072 ${dp} ${lr} -100 ${label_smooth_alpha} -100 ${pca_dim} "mean" "batchnorm"
 
     #sbatch scripts/launch.slurm 256 3 3 1024 ${dp} ${lr} -100 ${label_smooth_alpha} -100 ${pca_dim} "weighted_mean"
     #sbatch scripts/launch.slurm 512 3 3 2048 ${dp} ${lr} -100 ${label_smooth_alpha} -100 ${pca_dim} "weighted_mean"

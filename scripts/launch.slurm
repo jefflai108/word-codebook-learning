@@ -32,6 +32,7 @@ labelsmooth=$8
 w2v2_large_layerid=$9 
 pca_dim=${10}
 word_pool=${11}
+word_norm=${12}
 
 stage="v2.1_flickr8k+spokencoco" # v0 / v1 / v2 / v2.1 / v2.1_flickr8k+spokencoco
 
@@ -126,7 +127,7 @@ fi
 
 if [ "$stage" == "v2.1_flickr8k+spokencoco" ]; then 
     data_dir=/data/sls/scratch/clai24/word-seg/mix-corpus/
-    expdir=/data/sls/scratch/clai24/word-seg/codebook-learning/exp/debug_collection_v2.1_flickr8k+spokencoco/${word_pool}_pooled_wav2vec2_large_lv60_layer10,11,12,13,14_pca${pca_dim}_dmodel${d_model}_enclayer${num_encoder_layers}_declayer${num_decoder_layers}_ffn_dim${ffn_dim}_dp${dp}_lr${lr}_labelsmooth${labelsmooth}
+    expdir=/data/sls/scratch/clai24/word-seg/codebook-learning/exp/debug_collection_v2.1_flickr8k+spokencoco/${word_pool}_pooled_${word_norm}_normed_wav2vec2_large_lv60_layer10,11,12,13,14_pca${pca_dim}_dmodel${d_model}_enclayer${num_encoder_layers}_declayer${num_decoder_layers}_ffn_dim${ffn_dim}_dp${dp}_lr${lr}_labelsmooth${labelsmooth}
     mkdir -p ${expdir}
 
     CUDA_LAUNCH_BLOCKING=1 python main_v2_1_flickr8k_spokencoco.py \
@@ -137,12 +138,12 @@ if [ "$stage" == "v2.1_flickr8k+spokencoco" ]; then
                --total_train_split_num 20 \
                --word_seg_file_path ${data_dir}/word_seg_features/flickr_8k_spokencoco_speech_features.mat \
                --save_dir ${expdir} \
-               --batch_size 16 --gradient_acc_steps 16 \
+               --batch_size 20 --gradient_acc_steps 16 \
                --repre_dim ${pca_dim} \
                --num_layer_repre 5 \
-               --word_pooling ${word_pool} \
+               --word_pooling ${word_pool} --norm_type ${word_norm} \
                --vocab_size 1027 --d_model ${d_model} --nhead 8 --num_encoder_layers ${num_encoder_layers} --num_decoder_layers ${num_decoder_layers} --dim_feedforward ${ffn_dim} --model_activation "gelu" \
-               --dropout ${dp} --max_seq_length 100 --epochs 50 --log_interval 20 --learning_rate ${lr} --optimizer_type "adam" --label_smoothing $labelsmooth \
+               --dropout ${dp} --max_seq_length 100 --epochs 16 --log_interval 20 --learning_rate ${lr} --optimizer_type "adamw" --label_smoothing $labelsmooth \
                >> ${expdir}/training.log 2>&1
 fi
 
